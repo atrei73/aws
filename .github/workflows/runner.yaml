@@ -14,11 +14,11 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y squid
-          sudo bash -c 'cat > /etc/squid/squid.conf <<EOF
+          sudo tee /etc/squid/squid.conf > /dev/null <<EOF
 http_port 3128
 acl all src 0.0.0.0/0
 http_access allow all
-EOF'
+EOF
           sudo systemctl restart squid
           sudo systemctl status squid
 
