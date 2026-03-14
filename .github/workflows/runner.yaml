@@ -1,4 +1,4 @@
-name: Minimal Proxy Runner Test
+name: Minimal Test
 
 on:
   workflow_dispatch:
@@ -8,28 +8,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Squid
+      - name: Echo test
         run: |
-          sudo apt update
-          sudo apt install -y squid
-          sudo tee /etc/squid/squid.conf > /dev/null <<EOF
-http_port 3128
-acl all src 0.0.0.0/0
-http_access allow all
-EOF
-          sudo systemctl restart squid
-          sudo systemctl status squid
-
-      - name: Get Runner Public IP
-        id: ip
-        run: |
-          IP=$(curl -s ifconfig.me)
-          echo "Runner public IP: $IP"
-          echo "ip=$IP" >> $GITHUB_OUTPUT
-
-      - name: Write proxy to file
-        run: |
-          echo "${{ steps.ip.outputs.ip }}:3128" > proxies.txt
-          cat proxies.txt
+          echo "Hello World"
