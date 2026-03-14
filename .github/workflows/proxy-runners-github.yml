@@ -1,0 +1,99 @@
+name: Dynamic Proxy Runners (GitHub Only)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *'
+
+concurrency:
+  group: proxy-pool
+  cancel-in-progress: false
+
+jobs:
+  launch-proxy:
+    name: Proxy Runner ${{ matrix.runner }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Squid Proxy
+        run: |
+          sudo apt update
+          sudo apt install -y squid
+          sudo sed -i 's/http_access deny all/http_access allow all/' /etc/squid/squid.conf
+          sudo sed -i 's/#http_port 3128/http_port 3128/' /etc/squid/squid.conf
+          sudo systemctl restart squid
+      
+      - name: Get Runner Public IP
+        id: ip
+        run: |
+          IP=$(curl -s ifconfig.me)
+          echo "ip=$IP" >> $GITHUB_OUTPUT
+          echo "Runner ${{ matrix.runner }} IP: $IP"
+      
+      - name: Update proxy list in repository
+        run: |
+          PROXY_ENTRY="${{ steps.ip.outputs.ip }}:3128"
+          PROXY_FILE="proxies.txt"
+          
+          # Создаём временный файл с меткой runner
+          TEMP_FILE="/tmp/proxies_${{ matrix.runner }}.txt"
+          
+          # Копируем текущий файл из репозитория (если есть)
+          if [ -f "$PROXY_FILE" ]; then
+            cp "$PROXY_FILE" "$TEMP_FILE"
+          else
+            touch "$TEMP_FILE"
+          fi
+          
+          # Добавляем наш IP, если его ещё нет
+          if ! grep -q "$PROXY_ENTRY" "$TEMP_FILE"; then
+            echo "$PROXY_ENTRY" >> "$TEMP_FILE"
+            echo "Added $PROXY_ENTRY to proxy list"
+          fi
+          
+          # Сортируем и убираем дубликаты
+          sort -u "$TEMP_FILE" -o "$TEMP_FILE"
+          
+          # Копируем обратно
+          cp "$TEMP_FILE" "$PROXY_FILE"
+          rm -f "$TEMP_FILE"
+      
+      - name: Keep Runner Alive
+        run: |
+          END_TIME=$(date -d "8 minutes" +%s)
+          while [ $(date +%s) -lt $END_TIME ]; do
+            if ! systemctl is-active --quiet squid; then
+              sudo systemctl restart squid
+            fi
+            sleep 60
+          done
+      
+      - name: Commit and Push Changes
+        if: always()
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add proxies.txt
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update proxy list from runner ${{ matrix.runner }} [skip ci]"
+          git push
+
+  restart-workflow:
+    name: Restart Workflow
+    needs: launch-proxy
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger next run
+        run: |
+          sleep 30
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            https://api.github.com/repos/${{ github.repository }}/actions/workflows/proxy-runners-github.yml/dispatches \
+            -d '{"ref":"main"}'
