@@ -1,0 +1,44 @@
+name: Dynamic Proxy Runners
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *'
+
+jobs:
+  launch-proxy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        runner: [1,2,3,4,5]  # можно 1–20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Squid
+        run: |
+          sudo apt update
+          sudo apt install -y squid
+          sudo bash -c 'cat > /etc/squid/squid.conf <<EOF
+http_port 3128
+acl all src 0.0.0.0/0
+http_access allow all
+EOF'
+          sudo systemctl restart squid
+
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Create reverse tunnel
+        run: |
+          PORT=$((20000 + ${{ matrix.runner }}))
+          ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
+            -N -R 0.0.0.0:$PORT:localhost:3128 proxy2@${{ secrets.SERVER_IP }} &
+          echo "${{ secrets.SERVER_IP }}:$PORT" > proxies.txt
+
+      - name: Keep Runner Alive
+        run: sleep 480
