@@ -1,0 +1,51 @@
+name: Cleanup Stale Proxies
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'  # каждые 5 минут
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Remove stale proxy entries
+        run: |
+          CURRENT_TIME=$(date +%s)
+          MAX_AGE=600  # 10 минут в секундах
+
+          touch active-proxies.txt proxies.txt
+
+          TEMP_ACTIVE=$(mktemp)
+          TEMP_PROXIES=$(mktemp)
+
+          # Фильтруем активные прокси
+          if [ -f active-proxies.txt ]; then
+            while IFS= read -r line; do
+              [ -z "$line" ] && continue
+              ENTRY=$(echo "$line" | awk '{print $1}')
+              TIMESTAMP=$(echo "$line" | awk '{print $2}')
+              AGE=$((CURRENT_TIME - TIMESTAMP))
+              if [ $AGE -lt $MAX_AGE ]; then
+                echo "$line" >> $TEMP_ACTIVE
+                echo "$ENTRY" >> $TEMP_PROXIES
+              fi
+            done < active-proxies.txt
+          fi
+
+          # Обновляем файлы
+          sort -u $TEMP_PROXIES -o proxies.txt
+          mv $TEMP_ACTIVE active-proxies.txt
+
+          rm -f $TEMP_ACTIVE $TEMP_PROXIES
+
+      - name: Commit changes
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add proxies.txt active-proxies.txt
+          git diff --quiet && git diff --staged --quiet || git commit -m "Cleanup stale proxies [skip ci]"
+          git push
