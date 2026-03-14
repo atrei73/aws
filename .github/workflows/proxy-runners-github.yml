@@ -37,6 +37,46 @@ jobs:
           echo "ip=$IP" >> $GITHUB_OUTPUT
           echo "Runner ${{ matrix.runner }} IP: $IP"
       
+      - name: Test Cloudflare Tunnel (только первый раннер)
+        if: matrix.runner == 1
+        run: |
+          # Скачиваем cloudflared
+          curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          chmod +x cloudflared
+          
+          # Запускаем туннель к локальному Squid (порт 3128)
+          echo "Запускаем Cloudflare Tunnel..."
+          ./cloudflared tunnel --url http://localhost:3128 --no-autoupdate > tunnel.log 2>&1 &
+          
+          # Даем время на установку туннеля
+          echo "Ожидаем 15 секунд для установки туннеля..."
+          sleep 15
+          
+          # Получаем URL туннеля
+          TUNNEL_URL=$(grep -o 'https://.*\.trycloudflare\.com' tunnel.log | head -1)
+          
+          if [ -z "$TUNNEL_URL" ]; then
+            echo "❌ Не удалось получить URL туннеля. Лог:"
+            cat tunnel.log
+            exit 1
+          fi
+          
+          echo "🔥 Тестовый туннель: $TUNNEL_URL"
+          
+          # Проверяем, что туннель работает
+          echo "Проверяем доступность туннеля..."
+          curl -I $TUNNEL_URL
+          
+          # Сохраняем URL для отладки
+          echo "$TUNNEL_URL" > test-tunnel.txt
+          
+          # Держим туннель открытым 5 минут для ручного тестирования
+          echo "Туннель будет открыт 5 минут для тестирования..."
+          echo "Вы можете проверить его командой: curl -x $TUNNEL_URL http://ifconfig.me"
+          sleep 300
+          
+          echo "✅ Тест туннеля завершен"
+      
       - name: Register active proxy
         run: |
           IP="${{ steps.ip.outputs.ip }}"
