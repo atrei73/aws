@@ -44,15 +44,15 @@ jobs:
           TIMESTAMP=$(date +%s)
           ENTRY="$IP:$PORT"
           
+          echo "Registering proxy: $ENTRY"
+          
           # Создаём файл активных прокси если нет
           touch active-proxies.txt
           
-          # Добавляем запись с временной меткой (для последующей очистки)
-          # Формат: IP:PORT TIMESTAMP RUNNER_ID
+          # Добавляем запись с временной меткой
           echo "$ENTRY $TIMESTAMP ${{ matrix.runner }}" >> active-proxies.txt
           
-          # Также обновляем основной файл proxies.txt
-          # Сначала создаём временный файл
+          # Обновляем основной файл proxies.txt
           TEMP_FILE=$(mktemp)
           
           # Копируем существующий proxies.txt если есть
@@ -63,18 +63,22 @@ jobs:
           # Добавляем наш IP если его ещё нет
           if ! grep -q "$ENTRY" $TEMP_FILE; then
             echo "$ENTRY" >> $TEMP_FILE
-            echo "Added $ENTRY to proxy list"
+            echo "✅ Added $ENTRY to proxy list"
+          else
+            echo "⏭️ $ENTRY already exists in list"
           fi
           
           # Сортируем и убираем дубликаты
           sort -u $TEMP_FILE -o proxies.txt
           rm -f $TEMP_FILE
+          
+          # Показываем текущий список
+          echo "Current proxy list:"
+          cat proxies.txt
       
       - name: Keep Runner Alive
         run: |
-          # Раннер живёт 8 минут
           END_TIME=$(date -d "8 minutes" +%s)
-          
           echo "Runner will stay alive for 8 minutes"
           
           while [ $(date +%s) -lt $END_TIME ]; do
@@ -88,15 +92,51 @@ jobs:
       - name: Commit and Push Changes
         if: always()
         run: |
+          # Настройка git
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
           
-          # Добавляем оба файла
-          git add active-proxies.txt proxies.txt
+          echo "📁 Current directory: $(pwd)"
+          echo "📄 Files in directory:"
+          ls -la
           
-          # Коммитим если есть изменения
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update proxy lists from runner ${{ matrix.runner }} [skip ci]"
-          git push
+          # Проверяем наличие proxies.txt
+          if [ -f proxies.txt ]; then
+            echo "✅ proxies.txt exists with content:"
+            cat proxies.txt
+          else
+            echo "❌ ERROR: proxies.txt not found!"
+            exit 1
+          fi
+          
+          # Проверяем наличие active-proxies.txt
+          if [ -f active-proxies.txt ]; then
+            echo "✅ active-proxies.txt exists with content:"
+            cat active-proxies.txt
+          else
+            echo "⚠️ active-proxies.txt not found, creating..."
+            touch active-proxies.txt
+          fi
+          
+          # Добавляем файлы (с -f на всякий случай)
+          git add active-proxies.txt proxies.txt -f
+          
+          # Проверяем статус
+          echo "📊 Git status:"
+          git status
+          
+          # Коммитим
+          if git diff --cached --quiet; then
+            echo "ℹ️ No changes to commit"
+          else
+            git commit -m "Update proxy lists from runner ${{ matrix.runner }} [skip ci]"
+            echo "✅ Changes committed"
+            
+            # Пушим с pull rebase для избежания конфликтов
+            git pull --rebase origin main
+            git push
+            echo "✅ Changes pushed to repository"
+          fi
 
   restart-workflow:
     name: Restart Workflow
@@ -112,3 +152,4 @@ jobs:
             -H "Accept: application/vnd.github.v3+json" \
             https://api.github.com/repos/${{ github.repository }}/actions/workflows/proxy-runners-github.yml/dispatches \
             -d '{"ref":"main"}'
+          echo "✅ Next workflow triggered"
