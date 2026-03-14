@@ -2,7 +2,7 @@ name: Cleanup Stale Proxies (GitHub Only)
 
 on:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'  # каждые 5 минут
   workflow_dispatch:
 
 jobs:
@@ -11,33 +11,70 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Get active workflow runs
-        id: active
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Remove stale proxy entries
         run: |
-          # Получаем активные запуски нашего workflow
-          RUNS=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/proxy-runners-github.yml/runs?status=in_progress&per_page=100")
+          CURRENT_TIME=$(date +%s)
+          MAX_AGE=600  # 10 минут в секундах (максимальное время жизни прокси)
           
-          # Извлекаем IP из названий runner'ов (нужно добавить в основной workflow)
-          echo "Active runs found: $(echo "$RUNS" | jq '.total_count')"
-      
-      - name: Filter proxy list
-        run: |
-          if [ ! -f proxies.txt ]; then
-            echo "No proxy file found"
-            exit 0
+          echo "Current time: $CURRENT_TIME"
+          echo "Max age: $MAX_AGE seconds"
+          
+          # Проверяем наличие файлов
+          if [ ! -f active-proxies.txt ]; then
+            echo "No active-proxies.txt file found"
+            touch active-proxies.txt
           fi
           
-          # Здесь нужно сопоставить активные раннеры и IP
-          # Пока оставляем файл как есть
-          echo "Proxy list has $(wc -l < proxies.txt) entries"
+          if [ ! -f proxies.txt ]; then
+            echo "No proxies.txt file found"
+            touch proxies.txt
+          fi
+          
+          # Создаём временные файлы
+          TEMP_ACTIVE=$(mktemp)
+          TEMP_PROXIES=$(mktemp)
+          
+          # Фильтруем активные прокси
+          while IFS= read -r line; do
+            # Пропускаем пустые строки
+            if [ -z "$line" ]; then
+              continue
+            fi
+            
+            # Разбираем строку: "IP:PORT TIMESTAMP RUNNER_ID"
+            ENTRY=$(echo "$line" | awk '{print $1}')
+            TIMESTAMP=$(echo "$line" | awk '{print $2}')
+            RUNNER=$(echo "$line" | awk '{print $3}')
+            
+            # Проверяем возраст
+            AGE=$((CURRENT_TIME - TIMESTAMP))
+            if [ $AGE -lt $MAX_AGE ]; then
+              echo "$line" >> $TEMP_ACTIVE
+              echo "$ENTRY" >> $TEMP_PROXIES
+              echo "Keeping $ENTRY (age: ${AGE}s)"
+            else
+              echo "Removing stale entry: $ENTRY (age: ${AGE}s)"
+            fi
+          done < active-proxies.txt
+          
+          # Сортируем и убираем дубликаты в proxies.txt
+          sort -u $TEMP_PROXIES -o $TEMP_PROXIES
+          
+          # Обновляем файлы
+          mv $TEMP_ACTIVE active-proxies.txt
+          mv $TEMP_PROXIES proxies.txt
+          
+          # Очистка
+          rm -f $TEMP_ACTIVE $TEMP_PROXIES
+          
+          echo "Cleanup completed"
+          echo "Active proxies count: $(wc -l < active-proxies.txt)"
+          echo "Proxy list count: $(wc -l < proxies.txt)"
       
-      - name: Commit if changed
+      - name: Commit cleaned lists
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
-          git add proxies.txt
-          git diff --quiet && git diff --staged --quiet || git commit -m "Cleanup proxy list [skip ci]"
+          git add active-proxies.txt proxies.txt
+          git diff --quiet && git diff --staged --quiet || git commit -m "Cleanup stale proxies [skip ci]"
           git push
