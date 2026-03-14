@@ -3,7 +3,7 @@ name: Dynamic Proxy Runners (GitHub Only)
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/10 * * * *'  # каждые 10 минут
 
 concurrency:
   group: proxy-pool
@@ -28,6 +28,7 @@ jobs:
           sudo sed -i 's/http_access deny all/http_access allow all/' /etc/squid/squid.conf
           sudo sed -i 's/#http_port 3128/http_port 3128/' /etc/squid/squid.conf
           sudo systemctl restart squid
+          sudo systemctl status squid
       
       - name: Get Runner Public IP
         id: ip
@@ -36,39 +37,49 @@ jobs:
           echo "ip=$IP" >> $GITHUB_OUTPUT
           echo "Runner ${{ matrix.runner }} IP: $IP"
       
-      - name: Update proxy list in repository
+      - name: Register active proxy
         run: |
-          PROXY_ENTRY="${{ steps.ip.outputs.ip }}:3128"
-          PROXY_FILE="proxies.txt"
+          IP="${{ steps.ip.outputs.ip }}"
+          PORT="3128"
+          TIMESTAMP=$(date +%s)
+          ENTRY="$IP:$PORT"
           
-          # Создаём временный файл с меткой runner
-          TEMP_FILE="/tmp/proxies_${{ matrix.runner }}.txt"
+          # Создаём файл активных прокси если нет
+          touch active-proxies.txt
           
-          # Копируем текущий файл из репозитория (если есть)
-          if [ -f "$PROXY_FILE" ]; then
-            cp "$PROXY_FILE" "$TEMP_FILE"
-          else
-            touch "$TEMP_FILE"
+          # Добавляем запись с временной меткой (для последующей очистки)
+          # Формат: IP:PORT TIMESTAMP RUNNER_ID
+          echo "$ENTRY $TIMESTAMP ${{ matrix.runner }}" >> active-proxies.txt
+          
+          # Также обновляем основной файл proxies.txt
+          # Сначала создаём временный файл
+          TEMP_FILE=$(mktemp)
+          
+          # Копируем существующий proxies.txt если есть
+          if [ -f proxies.txt ]; then
+            cat proxies.txt > $TEMP_FILE
           fi
           
-          # Добавляем наш IP, если его ещё нет
-          if ! grep -q "$PROXY_ENTRY" "$TEMP_FILE"; then
-            echo "$PROXY_ENTRY" >> "$TEMP_FILE"
-            echo "Added $PROXY_ENTRY to proxy list"
+          # Добавляем наш IP если его ещё нет
+          if ! grep -q "$ENTRY" $TEMP_FILE; then
+            echo "$ENTRY" >> $TEMP_FILE
+            echo "Added $ENTRY to proxy list"
           fi
           
           # Сортируем и убираем дубликаты
-          sort -u "$TEMP_FILE" -o "$TEMP_FILE"
-          
-          # Копируем обратно
-          cp "$TEMP_FILE" "$PROXY_FILE"
-          rm -f "$TEMP_FILE"
+          sort -u $TEMP_FILE -o proxies.txt
+          rm -f $TEMP_FILE
       
       - name: Keep Runner Alive
         run: |
+          # Раннер живёт 8 минут
           END_TIME=$(date -d "8 minutes" +%s)
+          
+          echo "Runner will stay alive for 8 minutes"
+          
           while [ $(date +%s) -lt $END_TIME ]; do
             if ! systemctl is-active --quiet squid; then
+              echo "Squid died, restarting..."
               sudo systemctl restart squid
             fi
             sleep 60
@@ -79,14 +90,18 @@ jobs:
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
-          git add proxies.txt
-          git diff --quiet && git diff --staged --quiet || git commit -m "Update proxy list from runner ${{ matrix.runner }} [skip ci]"
+          
+          # Добавляем оба файла
+          git add active-proxies.txt proxies.txt
+          
+          # Коммитим если есть изменения
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update proxy lists from runner ${{ matrix.runner }} [skip ci]"
           git push
 
   restart-workflow:
     name: Restart Workflow
     needs: launch-proxy
-    if: always()
+    if: always() && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger next run
