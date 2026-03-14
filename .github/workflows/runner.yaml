@@ -3,14 +3,14 @@ name: Dynamic Proxy Runners
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/10 * * * *'  # каждые 10 минут
 
 jobs:
   launch-proxy:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        runner: [1,2,3,4,5]  # можно 1–20
+        runner: [1,2,3,4,5]  # можно увеличить до 20
 
     steps:
       - uses: actions/checkout@v4
@@ -38,7 +38,29 @@ EOF'
           PORT=$((20000 + ${{ matrix.runner }}))
           ssh -i ~/.ssh/id_ed25519 -o StrictHostKeyChecking=no \
             -N -R 0.0.0.0:$PORT:localhost:3128 proxy2@${{ secrets.SERVER_IP }} &
+          # Записываем рабочий прокси в файл
           echo "${{ secrets.SERVER_IP }}:$PORT" > proxies.txt
+          # Также сохраняем с меткой времени для cleanup
+          TIMESTAMP=$(date +%s)
+          echo "${{ secrets.SERVER_IP }}:$PORT $TIMESTAMP ${{ matrix.runner }}" >> active-proxies.txt
 
       - name: Keep Runner Alive
-        run: sleep 480
+        run: |
+          echo "Runner will stay alive for 8 minutes"
+          END_TIME=$(date -d "8 minutes" +%s)
+          while [ $(date +%s) -lt $END_TIME ]; do
+            if ! systemctl is-active --quiet squid; then
+              echo "Squid died, restarting..."
+              sudo systemctl restart squid
+            fi
+            sleep 60
+          done
+
+      - name: Commit and Push Changes
+        if: always()
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add active-proxies.txt proxies.txt -f
+          git diff --quiet && git diff --staged --quiet || git commit -m "Update proxy lists from runner ${{ matrix.runner }} [skip ci]"
+          git push
