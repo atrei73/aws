@@ -1,0 +1,43 @@
+name: Cleanup Stale Proxies (GitHub Only)
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Get active workflow runs
+        id: active
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Получаем активные запуски нашего workflow
+          RUNS=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/proxy-runners-github.yml/runs?status=in_progress&per_page=100")
+          
+          # Извлекаем IP из названий runner'ов (нужно добавить в основной workflow)
+          echo "Active runs found: $(echo "$RUNS" | jq '.total_count')"
+      
+      - name: Filter proxy list
+        run: |
+          if [ ! -f proxies.txt ]; then
+            echo "No proxy file found"
+            exit 0
+          fi
+          
+          # Здесь нужно сопоставить активные раннеры и IP
+          # Пока оставляем файл как есть
+          echo "Proxy list has $(wc -l < proxies.txt) entries"
+      
+      - name: Commit if changed
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          git add proxies.txt
+          git diff --quiet && git diff --staged --quiet || git commit -m "Cleanup proxy list [skip ci]"
+          git push
