@@ -4,14 +4,14 @@ on:
   push:
   workflow_dispatch:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/5 * * * *'  # Каждые 5 минут
 
 permissions:
   contents: write
 
 concurrency:
-  group: proxy-tunnel  # Одна группа для всех запусков
-  cancel-in-progress: false  # Не отменять текущий запуск
+  group: proxy-tunnel
+  cancel-in-progress: false
 
 jobs:
   runner:
@@ -26,12 +26,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           token: ${{ secrets.CI_LOOP_TOKEN }}
-      
-      - name: Wait for previous runners to finish
-        run: |
-          # Проверяем, не запущены ли уже другие раннеры
-          echo "Checking for existing runs..."
-          sleep 5
       
       - name: Install Squid and autossh
         run: |
@@ -64,8 +58,8 @@ jobs:
           
           echo "Tunnel established on port $REMOTE_PORT"
           
-          # Держим раннер живым 8 минут
-          sleep 480
+          # Время жизни раннера: 4 минуты (240 секунд)
+          sleep 240
       
       - name: Cleanup
         if: always()
@@ -81,7 +75,7 @@ jobs:
           
           TIMESTAMP=$(date +"%Y%m%d-%H%M%S")
           
-          # Создаем файл с меткой времени
+          # Создаем файл с меткой времени для форсирования коммита
           echo "$TIMESTAMP" > restart-tunnel.txt
           
           git add restart-tunnel.txt
