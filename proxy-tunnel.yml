@@ -1,0 +1,46 @@
+name: Proxy Runners with SSH Tunnel
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *'
+
+jobs:
+  runner:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
+    
+    steps:
+      - name: Install Squid and autossh
+        run: |
+          sudo apt update
+          sudo apt install -y squid autossh
+          
+          # Настройка Squid
+          sudo sed -i 's/http_access deny all/http_access allow all/' /etc/squid/squid.conf
+          sudo sed -i 's/#http_port 3128/http_port 3128/' /etc/squid/squid.conf
+          sudo systemctl restart squid
+      
+      - name: Setup SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/tunnel_key
+          chmod 600 ~/.ssh/tunnel_key
+          ssh-keyscan -H ${{ secrets.VPS_IP }} >> ~/.ssh/known_hosts
+      
+      - name: Create reverse tunnel
+        run: |
+          REMOTE_PORT=$((10000 + ${{ matrix.runner }}))
+          
+          # Запуск постоянного туннеля
+          autossh -M 0 -o "ServerAliveInterval 30" -o "ServerAliveCountMax 3" \
+            -N -R $REMOTE_PORT:localhost:3128 \
+            -i ~/.ssh/tunnel_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_IP }} &
+          
+          echo "Tunnel established on port $REMOTE_PORT"
+          
+          # Держим раннер живым 8 минут
+          sleep 480
