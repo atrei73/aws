@@ -1,6 +1,7 @@
 name: Proxy Runners with SSH Tunnel
 
 on:
+  push:  # <-- Добавлено! Запускается при каждом пуше
   workflow_dispatch:
   schedule:
     - cron: '*/10 * * * *'
@@ -67,7 +68,7 @@ jobs:
           echo "Tunnel closed for runner ${{ matrix.runner }}"
       
       - name: Restart workflow
-        if: always() && matrix.runner == 1  # Только первый раннер перезапускает
+        if: always() && matrix.runner == 1
         run: |
           git config --global user.name "github-actions"
           git config --global user.email "actions@github.com"
