@@ -5,6 +5,13 @@ on:
   schedule:
     - cron: '*/10 * * * *'
 
+permissions:
+  contents: write
+
+concurrency:
+  group: proxy-tunnel
+  cancel-in-progress: false
+
 jobs:
   runner:
     runs-on: ubuntu-latest
@@ -14,6 +21,10 @@ jobs:
         runner: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20]
     
     steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.CI_LOOP_TOKEN }}
+      
       - name: Install Squid and autossh
         run: |
           sudo apt update
@@ -44,3 +55,27 @@ jobs:
           
           # Держим раннер живым 8 минут
           sleep 480
+
+  restart-workflow:
+    name: Restart Workflow
+    needs: runner
+    if: always() && github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.CI_LOOP_TOKEN }}
+      
+      - name: Trigger next run via git push
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "actions@github.com"
+          
+          # Создаем файл с меткой времени для форсирования коммита
+          echo "$(date)" > restart-tunnel.txt
+          
+          git add restart-tunnel.txt
+          git commit -m "Restart tunnel proxy workflow $(date +%Y%m%d-%H%M%S)" --allow-empty
+          git push
+          
+          echo "✅ Next workflow triggered"
