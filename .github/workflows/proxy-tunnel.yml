@@ -4,7 +4,7 @@ on:
   push:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'  # Каждые 5 минут
+    - cron: '*/10 * * * *'  # Каждые 5 минут
 
 permissions:
   contents: write
@@ -60,7 +60,7 @@ jobs:
           ssh ${{ secrets.VPS_IP }} "echo '✅ SSH connection successful'"
       
       - name: Stagger start
-        run: sleep $(( (${{ matrix.runner }} - 1) * 2 ))
+        run: sleep $(( (${{ matrix.runner }} - 1) * 3 ))
       
       - name: Create reverse tunnel with retry
         run: |
@@ -97,7 +97,7 @@ jobs:
       - name: Keep runner alive
         run: |
           echo "Runner ${{ matrix.runner }} will stay alive for 240 seconds"
-          sleep 240
+          sleep 600
       
       - name: Cleanup
         if: always()
